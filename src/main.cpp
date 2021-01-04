@@ -18,6 +18,10 @@
 #define MOTION_PIN 7
 #define MIC_PIN A0
 
+#define AUDIO_RX_PIN 5
+#define AUDIO_WX_PIN 6
+#define AUDIO_BUSY_PIN 12
+
 #define SONAR_ECHO_PIN 6
 #define SONAR_TRIG_PIN 5
 
@@ -28,7 +32,7 @@
 #define STEPPER_PIN_4           11
 
 // ==== Debug and Test options ==================
-#define _DEBUG_
+//#define _DEBUG_
 #define _TEST_
 
 //===== Debugging macros ========================
@@ -69,8 +73,10 @@
 
 #include <TaskScheduler.h>
 #include <AccelStepper.h>
+#include <SoftwareSerial.h>
+#include "DFRobotDFPlayerMini.h"
 //#include <PinChangeInterrupt.h>
-//#include <U8glib.h>
+#include <U8glib.h>
 #include <avr/sleep.h>
 #include <avr/power.h>
 
@@ -82,7 +88,6 @@
 // display
 //U8GLIB_SSD1306_128X32 u8g(U8G_I2C_OPT_NONE);
 
-//String display = "Initial";
 
 // have to chech if seq of pin is right. pin 3 and 2 !! https://www.youtube.com/watch?v=0qwrnUeSpYQ
 AccelStepper motor = AccelStepper(FULL_STEP, STEPPER_PIN_1, STEPPER_PIN_3, STEPPER_PIN_2, STEPPER_PIN_4);
@@ -99,6 +104,12 @@ unsigned long micPauseUntil = 0;
 unsigned long motionPauseDuration = 15000;
 unsigned long motionPauseUntil = 0;
 
+SoftwareSerial audioSerial(AUDIO_RX_PIN,AUDIO_WX_PIN);
+DFRobotDFPlayerMini audio;
+//U8GLIB_SSD1306_128X32 u8g(U8G_I2C_OPT_NONE); // Just for 0.91”(128*32)
+//char display [32] = "Started";
+//bool redraw = true;
+
 // ==== Scheduler ==============================
 Scheduler ts;
 
@@ -112,6 +123,12 @@ void onMotor();
 bool onMotorEnable();
 void onMotorDisable();
 
+void setupAudio();
+void onAudio();
+bool onAudioEnable();
+void onAudioDisable();
+
+void setupU8g();
 // ==== Scheduling defines (cheat sheet) =====================
 /*
   TASK_MILLISECOND
@@ -137,7 +154,7 @@ Task tMic(TASK_IMMEDIATE, TASK_FOREVER, &onMic, &ts, true);
 //Task tTimeout (30 * TASK_SECOND, TASK_FOREVER, &cbTimeout, &ts, true);
 //
 Task tMotor(TASK_IMMEDIATE, TASK_FOREVER, &onMotor, &ts, false, &onMotorEnable, &onMotorDisable);
-
+Task tAudio(TASK_IMMEDIATE, TASK_FOREVER, &onAudio, &ts, false, &onAudioEnable, &onAudioDisable);
 
 
 // ==== CODE ======================================================================================
@@ -150,50 +167,52 @@ Task tMotor(TASK_IMMEDIATE, TASK_FOREVER, &onMotor, &ts, false, &onMotorEnable, 
 */
 /**************************************************************************/
 void setup() {
-    //pinMode(MOTION_PIN, INPUT);
-    //pinMode(LED_PIN, OUTPUT);
+    pinMode(MOTION_PIN, INPUT);
+    pinMode(MIC_PIN, INPUT);
 
-    //pinMode(SONAR_TRIG_PIN, OUTPUT); // Sets the trigPin as an Output
-    //pinMode(SONAR_ECHO_PIN, INPUT);
-
-
-    //motor.setAcceleration(500);
-
-    // flip screen, if required
-    // u8g.setRot180();
-
-
-    // assign default color value
-    /*if ( u8g.getMode() == U8G_MODE_R3G3B2 ) {
-      u8g.setColorIndex(255);     // white
-    }
-    else if ( u8g.getMode() == U8G_MODE_GRAY2BIT ) {
-      u8g.setColorIndex(3);         // max intensity
-    }
-    else if ( u8g.getMode() == U8G_MODE_BW ) {
-      u8g.setColorIndex(1);         // pixel on
-    }
-    else if ( u8g.getMode() == U8G_MODE_HICOLOR ) {
-      u8g.setHiColorByRGB(255,255,255);
-    }*/
-
+    setupAudio();
+    //setupU8g();
 
     // put your setup code here, to run once:
 #if defined(_DEBUG_) || defined(_TEST_)
-    Serial.begin(115200);
-    //Serial.begin(9600);
+    //Serial.begin(115200);
     //delay(2000);
     _PL("Scheduler Template: setup()");
 #endif
 
+}
 
+void setupAudio(){
+    pinMode(AUDIO_BUSY_PIN, INPUT);
+    audioSerial.begin(9600);
+    if (!audio.begin(audioSerial)) {  //Use softwareSerial to communicate with mp3.
+        while(true);
+    }
+
+    //audio.setTimeOut(500);
+    audio.volume(20);
+    audio.EQ(DFPLAYER_EQ_NORMAL);
+    audio.outputDevice(DFPLAYER_DEVICE_SD);
 }
 
 
-//void draw() {
-// u8g.setFont(u8g_font_unifont);
-//  u8g.setPrintPos(15, 25);
-//  u8g.print(display);
+//void setupU8g(void) {
+//    // flip screen, if required
+//    // u8g.setRot180();
+//    // assign default color value
+//    if (u8g.getMode() == U8G_MODE_R3G3B2) {
+//        u8g.setColorIndex(255);     // white
+//    } else if (u8g.getMode() == U8G_MODE_GRAY2BIT) {
+//        u8g.setColorIndex(3);         // max intensity
+//    } else if (u8g.getMode() == U8G_MODE_BW) {
+//        u8g.setColorIndex(1);         // pixel on
+//    } else if (u8g.getMode() == U8G_MODE_HICOLOR) {
+//        u8g.setHiColorByRGB(255, 255, 255);
+//    }
+//    u8g.setFont(u8g_font_unifont);
+//}
+//void draw(void) {
+//    u8g.drawStr(0, 10, display);
 //}
 
 
@@ -209,25 +228,9 @@ void loop() {
     ts.execute();
 }
 
-
-void onMic(){
-    if(micPauseUntil >= millis()) return;
-    int value = analogRead(MIC_PIN);
-    if (value > 250){
-        motorDirection  = motorDirection == 1 ? -1 : 1;
-        //motor.setSpeed(motorDirection*motor.speed());
-        motor.move(motorDirection*4096);
-        micPauseUntil = millis() + micPauseDuration;
-    }
-}
-
-
 void onMotion() {
     //tTimeout.restartDelayed();
-
-    // don't check if motor is already running
-    if(tMotor.isEnabled()) return;
-    if(motionPauseUntil >= millis()) return;
+    if(tMotor.isEnabled() || motionPauseUntil >= millis()) return;
     int value = digitalRead(MOTION_PIN);
     if (value == HIGH) {
         tMotor.enable();
@@ -235,42 +238,65 @@ void onMotion() {
     }
 }
 
-
 void onMotor() {
-    unsigned long now = millis();
-    if(motorStopTs >= now){
-        //if(motor.distanceToGo() > motor.targetPosition()/2){
-        //  motor.move(motorDirection*4096);
-        //}
-        motor.move(motorDirection*4096);
+    if(motorStopTs >= millis()){
+        motor.move(motorDirection * 2048);
         motor.run();
     }else{
         tMotor.disable();
-        motor.stop();
-        {}while(motor.run());  // wait
     }
 }
 
 bool onMotorEnable() {
-    motor.setMaxSpeed(500);
-    //motor.setSpeed(motorDirection*100);
-    motor.setAcceleration(100);
-    //motor.setCurrentPosition(0);
-    motor.move(motorDirection*4096);
+    motor.setMaxSpeed(400);
+    motor.setAcceleration(80);
     motorStartTs = millis();
     motorStopTs = motorStartTs + motorDuration;
+
+    // pause mic for a second if not paused
+    if(micPauseUntil <= (millis() + 1000)) {
+        micPauseUntil = millis() + 1000;
+    }
     return true;
 }
 
 void onMotorDisable() {
-    //motor.runToNewPosition(0);
+    motor.stop();
+    {}while(motor.run());  // wait
 
-    //motor.setSpeed(0);
-    //motor.moveTo(0);
-    //motor.setCurrentPosition(0);
+    // pause mic for a second if not paused
+    if(micPauseUntil <= (millis() + 1000)) {
+        micPauseUntil = millis() + 1000;
+    }
+}
+
+void onMic(){
+    if(micPauseUntil >= millis()) return;
+    if(digitalRead(AUDIO_BUSY_PIN) == LOW) return;
+    int value = analogRead(MIC_PIN);
+    if (motor.isRunning() ? value > 1000 : value > 150) {
+        micPauseUntil = millis() + 10000;
+        tAudio.enable();
+    }
 }
 
 
+bool onAudioEnable(){
+    randomSeed(analogRead(MIC_PIN) + motor.currentPosition() + millis());
+    audio.playMp3Folder(random(1, audio.readFileCounts()));
+    //audio.playMp3Folder();
+    return true;
+}
+
+void onAudio(){
+    if ((micPauseUntil - 1000) >= millis()) return;
+    if(digitalRead(AUDIO_BUSY_PIN) == LOW) return;
+    tAudio.disable();
+}
+
+void onAudioDisable(){
+    audio.stop();
+}
 
 void onSonar(){
     digitalWrite(SONAR_TRIG_PIN, LOW);
@@ -282,7 +308,7 @@ void onSonar(){
 
     int duration= pulseIn(SONAR_ECHO_PIN, HIGH);
     int cm =  duration * 0.034/2;
-    int mm =  cm *10;
+    //int mm =  cm *10;
 
     if(cm>=0 && cm<=5){
         motor.setSpeed(0);
@@ -295,32 +321,25 @@ void onSonar(){
     }
     else{
         digitalWrite(LED_PIN, LOW);
-        //motor.setSpeed(0);
     }
-
-    //if (value > 100){
-    //  motor.setSpeed(1000);
-    //}else{
-    //  motor.setSpeed(0);
-    //}
 }
 
 
 
 
 void cbTimeout() {
-    _PM("taskTimeout()");
+    //_PM("taskTimeout()");
     set_sleep_mode(SLEEP_MODE_PWR_DOWN);
     cli();
     sleep_enable();
-    sleep_bod_disable();
+    //sleep_bod_disable();
     sei();
     //attachPinChangeInterrupt(MOTION_PIN, &onMotion, FALLING);
-    //  power_all_disable();
+    power_all_disable();
     sleep_cpu();
-
-    // z..z..z..Z..Z..Z
-
-    /* wake up here */
+//
+    //// z..z..z..Z..Z..Z
+//
+    ///* wake up here */
     sleep_disable();
 }
