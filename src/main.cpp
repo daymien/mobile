@@ -32,7 +32,7 @@
 #define STEPPER_PIN_4           11
 
 // ==== Debug and Test options ==================
-//#define _DEBUG_
+#define _DEBUG_
 #define _TEST_
 
 //===== Debugging macros ========================
@@ -169,14 +169,12 @@ Task tAudio(TASK_IMMEDIATE, TASK_FOREVER, &onAudio, &ts, false, &onAudioEnable, 
 void setup() {
     pinMode(MOTION_PIN, INPUT);
     pinMode(MIC_PIN, INPUT);
-
     setupAudio();
     //setupU8g();
 
     // put your setup code here, to run once:
 #if defined(_DEBUG_) || defined(_TEST_)
-    //Serial.begin(115200);
-    //delay(2000);
+    Serial.begin(115200);
     _PL("Scheduler Template: setup()");
 #endif
 
@@ -234,6 +232,7 @@ void onMotion() {
     int value = digitalRead(MOTION_PIN);
     if (value == HIGH) {
         tMotor.enable();
+
         motionPauseUntil = motorStopTs + motionPauseDuration;
     }
 }
