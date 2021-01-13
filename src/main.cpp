@@ -33,7 +33,7 @@
 
 // ==== Debug and Test options ==================
 #define _DEBUG_
-#define _TEST_
+//#define _TEST_
 
 //===== Debugging macros ========================
 #ifdef _DEBUG_
@@ -77,6 +77,7 @@
 #include "DFRobotDFPlayerMini.h"
 //#include <PinChangeInterrupt.h>
 #include <U8glib.h>
+#include "stdlib.h"
 #include <avr/sleep.h>
 #include <avr/power.h>
 
@@ -110,6 +111,10 @@ DFRobotDFPlayerMini audio;
 //char display [32] = "Started";
 //bool redraw = true;
 
+unsigned int currentAudio = 0;
+unsigned int fileCount = 0;
+int *pAudioFiles;
+
 // ==== Scheduler ==============================
 Scheduler ts;
 
@@ -127,8 +132,9 @@ void setupAudio();
 void onAudio();
 bool onAudioEnable();
 void onAudioDisable();
+bool audioIsPlaying();
 
-void setupU8g();
+//    void setupU8g();
 // ==== Scheduling defines (cheat sheet) =====================
 /*
   TASK_MILLISECOND
@@ -155,6 +161,14 @@ Task tMic(TASK_IMMEDIATE, TASK_FOREVER, &onMic, &ts, true);
 //
 Task tMotor(TASK_IMMEDIATE, TASK_FOREVER, &onMotor, &ts, false, &onMotorEnable, &onMotorDisable);
 Task tAudio(TASK_IMMEDIATE, TASK_FOREVER, &onAudio, &ts, false, &onAudioEnable, &onAudioDisable);
+
+
+//void onTest();
+//Task tTest(3*TASK_SECOND, TASK_FOREVER, &onTest, &ts, true);
+//
+//void onTest(){
+//    _PL(millis());
+//}
 
 
 // ==== CODE ======================================================================================
@@ -227,12 +241,10 @@ void loop() {
 }
 
 void onMotion() {
-    //tTimeout.restartDelayed();
     if(tMotor.isEnabled() || motionPauseUntil >= millis()) return;
     int value = digitalRead(MOTION_PIN);
     if (value == HIGH) {
         tMotor.enable();
-
         motionPauseUntil = motorStopTs + motionPauseDuration;
     }
 }
@@ -270,31 +282,60 @@ void onMotorDisable() {
 }
 
 void onMic(){
-    if(micPauseUntil >= millis()) return;
-    if(digitalRead(AUDIO_BUSY_PIN) == LOW) return;
+    if(micPauseUntil >= millis() || audioIsPlaying()) return;
     int value = analogRead(MIC_PIN);
-    if (motor.isRunning() ? value > 1000 : value > 150) {
-        micPauseUntil = millis() + 10000;
+    if (motor.isRunning() ? value > 1000 : value > 120) {
+        micPauseUntil = millis() + 5000;
         tAudio.enable();
     }
 }
 
 
 bool onAudioEnable(){
-    randomSeed(analogRead(MIC_PIN) + motor.currentPosition() + millis());
-    audio.playMp3Folder(random(1, audio.readFileCounts()));
-    //audio.playMp3Folder();
+    if (pAudioFiles == NULL) {
+        fileCount = audio.readFileCounts();
+        if(fileCount <= 0){
+            exit(1);
+        }
+        pAudioFiles =  (int *)malloc(sizeof(int)*fileCount);
+        if(pAudioFiles == NULL) {
+            printf("malloc of size %d failed!\n", fileCount);   // could also call perror here
+            exit(1);   // or return an error to caller
+        }
+
+        // fill audio array
+        for(int i=0; i < fileCount +1; i++) {
+            pAudioFiles[i] = i+1;
+            //_PM(pAudioFiles[i]);
+        }
+
+        // shuffle audio array
+        srand(millis() + motor.distanceToGo());
+        for (int i = 0; i < fileCount; i++)
+        {
+            size_t j = i + rand() / (RAND_MAX / (fileCount - i) + 1);
+            int t = pAudioFiles[j];
+            pAudioFiles[j] = pAudioFiles[i];
+            pAudioFiles[i] = t;
+            _PM(pAudioFiles[i]);
+        }
+    }
+    _PM(currentAudio++ % fileCount);
+    audio.playMp3Folder(pAudioFiles[currentAudio]);
     return true;
 }
 
 void onAudio(){
-    if ((micPauseUntil - 1000) >= millis()) return;
-    if(digitalRead(AUDIO_BUSY_PIN) == LOW) return;
+    if ((micPauseUntil - 1000) >= millis() || audioIsPlaying()) return;
     tAudio.disable();
 }
 
 void onAudioDisable(){
     audio.stop();
+}
+
+bool audioIsPlaying(){
+    return digitalRead(AUDIO_BUSY_PIN) == LOW;
 }
 
 void onSonar(){
