@@ -94,15 +94,13 @@
 AccelStepper motor = AccelStepper(FULL_STEP, STEPPER_PIN_1, STEPPER_PIN_3, STEPPER_PIN_2, STEPPER_PIN_4);
 unsigned long motorStartTs = 0;
 unsigned long motorStopTs = 0;
-unsigned long motorDuration = 60000;
+unsigned long motorDuration = 30000;
 short motorDirection = 1;
 
 
-//unsigned long motionDuration = motorDuration * 1.25;
-unsigned long micPauseDuration = 5000;
 unsigned long micPauseUntil = 0;
 
-unsigned long motionPauseDuration = 15000;
+unsigned long motionPauseDuration = 10000;
 unsigned long motionPauseUntil = 0;
 
 SoftwareSerial audioSerial(AUDIO_RX_PIN,AUDIO_WX_PIN);
@@ -320,7 +318,8 @@ bool onAudioEnable(){
             _PM(pAudioFiles[i]);
         }
     }
-    _PM(currentAudio++ % fileCount);
+    currentAudio = currentAudio++ % fileCount;
+    _PM(currentAudio);
     audio.playMp3Folder(pAudioFiles[currentAudio]);
     return true;
 }
